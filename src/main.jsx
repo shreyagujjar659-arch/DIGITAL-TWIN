@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import {
   ArrowUpRight, Bell, Bot, Check, ChevronRight, CloudRain, Compass, Crown,
@@ -72,13 +72,44 @@ function App({ user }) {
   const [active, setActive] = useState('Overview')
   const [journeyActive, setJourneyActive] = useState(false)
   const [sosOpen, setSosOpen] = useState(false)
-  const [locationOn, setLocationOn] = useState(true)
+  const [locationOn, setLocationOn] = useState(false)
+  const [location, setLocation] = useState({ status: 'idle', latitude: null, longitude: null, accuracy: null })
   const [chatOpen, setChatOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const [chatMessages, setChatMessages] = useState(messages)
   const [toast, setToast] = useState('')
+  const locationWatchId = useRef(null)
 
   const notify = (text) => { setToast(text); window.setTimeout(() => setToast(''), 2800) }
+  useEffect(() => () => {
+    if (locationWatchId.current !== null && navigator.geolocation) navigator.geolocation.clearWatch(locationWatchId.current)
+  }, [])
+  const requestLocation = () => {
+    if (!navigator.geolocation) { setLocation({ status: 'unsupported', latitude: null, longitude: null, accuracy: null }); notify('This browser does not support location'); return }
+    if (locationWatchId.current !== null) navigator.geolocation.clearWatch(locationWatchId.current)
+    setLocation((current) => ({ ...current, status: 'requesting' }))
+    locationWatchId.current = navigator.geolocation.watchPosition(
+      (position) => {
+        const latitude = position.coords.latitude
+        const longitude = position.coords.longitude
+        const accuracy = position.coords.accuracy
+        console.log(latitude, longitude, accuracy)
+        setLocation({ status: 'ready', latitude, longitude, accuracy })
+        setLocationOn(true)
+        notify(accuracy > 500 ? 'Location found, but accuracy is low' : 'Current location updated')
+      },
+      (error) => {
+        console.error('Location error:', error.message)
+        const status = error.code === 1 ? 'denied' : error.code === 2 ? 'unavailable' : error.code === 3 ? 'timeout' : 'error'
+        setLocation((current) => ({ ...current, status }))
+        setLocationOn(false)
+        notify(status === 'denied' ? 'Location permission was denied' : status === 'unavailable' ? 'Location is unavailable' : status === 'timeout' ? 'Location request timed out' : 'Unable to find your location')
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
+    )
+  }
+  const toggleLocation = () => { if (locationOn) { if (locationWatchId.current !== null) navigator.geolocation.clearWatch(locationWatchId.current); locationWatchId.current = null; setLocationOn(false); setLocation((current) => ({ ...current, status: 'paused' })); notify('Location access paused') } else requestLocation() }
+  const locationLabel = location.status === 'ready' ? `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}` : location.status === 'requesting' ? 'Requesting permission...' : location.status === 'denied' ? 'Permission denied' : location.status === 'unavailable' ? 'Location unavailable' : location.status === 'timeout' ? 'Request timed out' : location.status === 'paused' ? 'Location paused' : 'Tap Refresh to get GPS'
   const sendMessage = () => {
     if (!draft.trim()) return
     setChatMessages([...chatMessages, { from: 'user', text: draft }, { from: 'twin', text: 'I’m factoring that into your day. I’ll keep your preferences and current context in mind.' }])
@@ -106,7 +137,7 @@ function App({ user }) {
 
           <div className="metric-grid">
             <article className="metric-card weather-card"><div className="card-top"><div><span className="label">Weather now</span><strong className="temp">18°</strong></div><div className="weather-icon"><CloudRain size={25} /></div></div><div className="weather-meta"><span>Light rain · 72% humidity</span><span>↗ 12 km/h</span></div><div className="forecast"><span>10 AM <b>18°</b></span><span>12 PM <b>19°</b></span><span>2 PM <b>17°</b></span><span>4 PM <b>16°</b></span></div></article>
-            <article className="metric-card location-card"><div className="card-top"><span className="label">Current location</span><button className={locationOn ? 'switch on' : 'switch'} onClick={() => setLocationOn(!locationOn)}><span /></button></div><div className="map-preview"><div className="map-grid" /><div className="route-line" /><div className="map-pin"><MapPin size={16} /></div><span className="map-label">{locationOn ? 'SoMa, San Francisco' : 'Location paused'}</span></div><div className="location-foot"><span><LocateFixed size={13} /> {locationOn ? 'Live location on' : 'Permission paused'}</span><button onClick={() => notify('Opening location details')}>Details <ArrowUpRight size={13} /></button></div></article>
+            <article className="metric-card location-card"><div className="card-top"><span className="label">Current location</span><button aria-label="Toggle location permission" className={locationOn ? 'switch on' : 'switch'} onClick={toggleLocation}><span /></button></div><div className="map-preview"><div className="map-grid" /><div className="route-line" />{location.status === 'ready' && <div className="map-pin"><MapPin size={16} /></div>}<span className="map-label">{locationLabel}</span></div><div className="location-foot"><span><LocateFixed size={13} /> {locationOn ? `GPS live${location.accuracy ? ` · ±${Math.round(location.accuracy)}m` : ''}` : location.status === 'denied' ? 'Permission denied' : location.status === 'unavailable' ? 'Location unavailable' : location.status === 'timeout' ? 'Request timed out' : 'GPS off'}</span><button className="refresh-location" onClick={requestLocation}><LocateFixed size={13} /> Refresh</button></div>{location.status === 'ready' && location.accuracy > 500 && <p className="location-warning">Low accuracy. Enable device location services or move near a window for a better reading.</p>}</article>
           </div>
 
           <div className="section-heading"><div><span className="eyebrow">Your companion</span><h3>AI Digital Twin</h3></div><button className="text-btn" onClick={() => setChatOpen(true)}>Open conversation <ArrowUpRight size={15} /></button></div>
